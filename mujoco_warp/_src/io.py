@@ -1449,6 +1449,12 @@ def put_data(
 
   device = wp_inner.get_device()
   if device.is_hip:
+    # Disable mempool to avoid ROCm hipMemsetAsync corruption bug
+    # (mempool memset corrupts HIP context, breaking subsequent torch allocations).
+    # This is safe: wp.zeros() falls back to synchronous hipMalloc.
+    # Remove when Warp PR#15+PR#16 is merged into amd-integration.
+    if wp.is_mempool_enabled(device):
+      wp.set_mempool_enabled(device, False)
     d._stream_collision = wp_inner.Stream(device)  # for collision detection
     d._stream_secondary = wp_inner.Stream(device)  # for independent kinematics work
     d._stream_cg = wp_inner.Stream(device)  # for CG prev_grad update
