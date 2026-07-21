@@ -1523,28 +1523,48 @@ def put_data(
   if getattr(mjm, "nacttrnbody", 0) > 0:
     d._scratch_ncon_trnbody = wp.zeros((nworld, mjm.nacttrnbody), dtype=int)
 
-  # AMD Opt A+ (hipGraph COALESCE_IO equivalent): flag that deferred pre-alloc
-  # is needed. Actual allocation happens lazily on first solve() call, AFTER
-  # mjlab has finalized mempool state (mjlab disables mempool after wp.init(),
-  # so allocating here would corrupt those buffers on ROCm 7.2).
-  d._hip_coalesce_io_pending = True  # triggers lazy alloc in solver.py solve()
-  # Also pre-allocate collision context (create_collision_context called every step)
-  # Do this here (not lazily) since collision runs before solve() in step()
-  # Use non-pooled hipMalloc for stable pointers during graph capture
-  if device.is_hip:
-    import os as _io_os
-    if _io_os.environ.get("WP_HIP_GRAPH_ENABLE", "0") == "1" and nworld > 0:
-      _naconmax = int(getattr(d, "naconmax", 0))
-      if _naconmax > 0:
-        from mujoco_warp._src.collision_core import create_collision_context as _ccc
-        # Allocate with mempool off so we get hipMalloc (stable pointer for graph)
-        if wp.is_mempool_enabled(device):
-          wp.set_mempool_enabled(device, False)
-          d._collision_ctx = _ccc(_naconmax)
-          wp.set_mempool_enabled(device, True)
-        else:
-          d._collision_ctx = _ccc(_naconmax)
-        print(f"[INFO] AMD Opt A+: collision context pre-allocated via hipMalloc (naconmax={_naconmax})")
+  # AMD Opt A+ (hipGraph COALESCE_IO equivalent): eagerly pre-allocate ALL
+  # step()-path buffers with hipMalloc (non-pooled, stable pointers) so that
+  # mjlab's wp.ScopedCapture() sees no dynamic allocations inside step().
+  # Must happen HERE (put_data) not lazily in solve(), because mjlab calls
+  # create_graph() immediately after put_data() — lazy alloc would fire inside
+  # the capture window and trigger error 901.
+  # Pattern: disable mempool -> allocate -> re-enable mempool (= COALESCE_IO).
+  import os as _io_os
+  if device.is_hip and _io_os.environ.get("WP_HIP_GRAPH_ENABLE", "0") == "1":
+    _was_pool = wp.is_mempool_enabled(device)
+    if _was_pool:
+      wp.set_mempool_enabled(device, False)
+
+    # solver context (~20 buffers) — use _solver_ctx_prealloc (takes primitives,
+    # avoids needing the warp Model object which isn't built yet at put_data time)
+    _alloc_h = int(getattr(getattr(mjm, "opt", None), "solver", 2)) == 3  # NEWTON=3
+    _alloc_hf = _alloc_h and mjm.nv > 64  # _BLOCK_CHOLESKY_DIM=64
+    _nv_pad = int(getattr(mjm, "nv_pad", mjm.nv))
+    d._solver_ctx = _solver_ctx_prealloc(nworld, mjm.nv, _nv_pad, d.njmax, _alloc_h, _alloc_hf)
+    # step_size_cost
+    _ls_par = bool(getattr(getattr(mjm, "opt", None), "ls_parallel", False))
+    _ls_it = int(getattr(getattr(mjm, "opt", None), "ls_iterations", 10)) if _ls_par else 0
+    d._step_size_cost = wp.empty((nworld, _ls_it), dtype=float)
+    # smooth.py buffers
+    d._scratch_subtree_bodyvel = wp.empty((nworld, mjm.nbody), dtype=wp.spatial_vector)
+    if getattr(mjm, "nwrap", 0) > 0:
+      d._scratch_wrap_geom_xpos = wp.empty((nworld, mjm.nwrap), dtype=wp.spatial_vector)
+    # constraint.py buffer
+    d._scratch_efc_nnz = wp.empty((nworld,), dtype=int)
+    # collision context (3 buffers)
+    _naconmax = int(getattr(d, "naconmax", 0))
+    if _naconmax > 0:
+      from mujoco_warp._src.collision_core import create_collision_context as _ccc
+      d._collision_ctx = _ccc(_naconmax)
+
+    if _was_pool:
+      wp.set_mempool_enabled(device, True)
+    d._hip_coalesce_io_pending = False
+    print(f"[INFO] AMD Opt A+: all COALESCE_IO buffers pre-allocated via hipMalloc "
+          f"(solver_ctx, step_size_cost, subtree_bodyvel, efc_nnz, collision_ctx)")
+  else:
+    d._hip_coalesce_io_pending = True  # fallback: lazy alloc in solver.py
 
   # AMD Opt D: hipGraph capture of full step().
   # On AMD devices, after 3 warmup calls we capture one step() as a CUDA/HIP graph
