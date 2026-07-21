@@ -1515,28 +1515,11 @@ def put_data(
   if getattr(mjm, "nacttrnbody", 0) > 0:
     d._scratch_ncon_trnbody = wp.zeros((nworld, mjm.nacttrnbody), dtype=int)
 
-  # AMD Opt A+ (hipGraph COALESCE_IO equivalent): pre-allocate ALL buffers that
-  # are dynamically allocated inside step() to give hipGraph stable pointers.
-  # Without this, hipGraph capture fails to record device allocations and each
-  # replay re-allocates -- negating all graph-replay benefit (same root cause as
-  # ORT/MIGraphX needing COALESCE_IO=1 alongside HIP_GRAPH_ENABLE=1).
-
-  # solver context (create_solver_context called every step otherwise)
-  _alloc_h = int(getattr(getattr(mjm, "opt", None), "solver", 2)) == 3  # SolverType.NEWTON
-  _alloc_hfactor = _alloc_h and mjm.nv > 64
-  _nv_pad = int(getattr(mjm, "nv_pad", mjm.nv))
-  d._solver_ctx = _solver_ctx_prealloc(nworld, mjm.nv, _nv_pad, d.njmax, _alloc_h, _alloc_hfactor)
-  # step_size_cost (allocated in _solve() every step)
-  _ls_parallel = bool(getattr(getattr(mjm, "opt", None), "ls_parallel", False))
-  _ls_iters = int(getattr(getattr(mjm, "opt", None), "ls_iterations", 10)) if _ls_parallel else 0
-  d._step_size_cost = wp.empty((nworld, _ls_iters), dtype=float)
-  # smooth.py: subtree_bodyvel (subtree_vel, called every step)
-  d._scratch_subtree_bodyvel = wp.empty((nworld, mjm.nbody), dtype=wp.spatial_vector)
-  # smooth.py: wrap_geom_xpos (tendon, called when nwrap > 0)
-  if getattr(mjm, "nwrap", 0) > 0:
-    d._scratch_wrap_geom_xpos = wp.empty((nworld, mjm.nwrap), dtype=wp.spatial_vector)
-  # constraint.py: efc_nnz (make_constraint, called every step)
-  d._scratch_efc_nnz = wp.empty((nworld,), dtype=int)
+  # AMD Opt A+ (hipGraph COALESCE_IO equivalent): flag that deferred pre-alloc
+  # is needed. Actual allocation happens lazily on first solve() call, AFTER
+  # mjlab has finalized mempool state (mjlab disables mempool after wp.init(),
+  # so allocating here would corrupt those buffers on ROCm 7.2).
+  d._hip_coalesce_io_pending = True  # triggers lazy alloc in solver.py solve()
 
   # AMD Opt D: hipGraph capture of full step().
   # On AMD devices, after 3 warmup calls we capture one step() as a CUDA/HIP graph

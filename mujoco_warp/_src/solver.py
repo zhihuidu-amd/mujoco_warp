@@ -3401,11 +3401,26 @@ def solve(m: types.Model, d: types.Data):
       scatter_Ma = m.opt.integrator != types.IntegratorType.RK4
       island.scatter_island_results(m, d, ctx, scatter_Ma=scatter_Ma)
     else:
-      # AMD Opt A+: reuse pre-allocated solver context to eliminate per-step allocs
-      # (hipGraph COALESCE_IO equivalent — stable pointers required for graph capture)
+      # AMD Opt A+ (hipGraph COALESCE_IO equivalent): lazy pre-alloc on first call.
+      # Allocated here (not in put_data) so mjlab has already finalized mempool
+      # state before our buffers are created -- avoids ROCm 7.2 mempool corruption.
+      if getattr(d, "_hip_coalesce_io_pending", False):
+        import warp as _wp
+        _alloc_h = m.opt.solver == SolverType.NEWTON
+        _alloc_hfactor = _alloc_h and m.nv > _BLOCK_CHOLESKY_DIM
+        d._solver_ctx = create_solver_context(m, d)
+        _ls_iters = m.opt.ls_iterations if m.opt.ls_parallel else 0
+        d._step_size_cost = _wp.empty((d.nworld, _ls_iters), dtype=float)
+        d._scratch_subtree_bodyvel = _wp.empty((d.nworld, m.nbody), dtype=_wp.spatial_vector)
+        if m.nwrap > 0:
+          d._scratch_wrap_geom_xpos = _wp.empty((d.nworld, m.nwrap), dtype=_wp.spatial_vector)
+        d._scratch_efc_nnz = _wp.empty((d.nworld,), dtype=int)
+        d._hip_coalesce_io_pending = False
+        _dev = _wp.get_device()
+        print(f"[INFO] AMD Opt A+: COALESCE_IO buffers allocated "
+              f"(mempool={'enabled' if _wp.is_mempool_enabled(_dev) else 'disabled'})")
       if hasattr(d, "_solver_ctx"):
         ctx = d._solver_ctx
-        # zero gradient buffers that must start at zero each solve
         ctx.grad.zero_()
         ctx.Mgrad.zero_()
         if ctx.h.shape[0] > 0:
