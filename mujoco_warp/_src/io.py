@@ -1,3 +1,4 @@
+import os
 # Copyright 2025 The Newton Developers
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -1484,10 +1485,17 @@ def put_data(
   if device.is_hip:
     # Disable mempool to avoid ROCm hipMemsetAsync corruption bug
     # (mempool memset corrupts HIP context, breaking subsequent torch allocations).
-    # This is safe: wp.zeros() falls back to synchronous hipMalloc.
-    # Remove when Warp PR#15+PR#16 is merged into amd-integration.
-    if wp.is_mempool_enabled(device):
+    # Skip when WP_HIP_GRAPH_ENABLE=1: PR#15+PR#16 make mempool safe for hipGraph,
+    # and mempool MUST stay enabled for hipGraph capture to work (COALESCE_IO pattern).
+    _hip_graph_enabled = os.environ.get("WP_HIP_GRAPH_ENABLE", "0") == "1"
+    if wp.is_mempool_enabled(device) and not _hip_graph_enabled:
       wp.set_mempool_enabled(device, False)
+      print(f"[INFO] Disabled Warp memory pool on HIP/ROCm device {repr(device.alias)} "
+            f"(mempool memset is unreliable on ROCm and can corrupt the HIP context, "
+            f"breaking subsequent PyTorch allocations).")
+    elif _hip_graph_enabled:
+      print(f"[INFO] Keeping mempool enabled on HIP/ROCm device {repr(device.alias)} "
+            f"(WP_HIP_GRAPH_ENABLE=1: PR#15+PR#16 make mempool safe for hipGraph).")
     d._stream_collision = wp_inner.Stream(device)  # for collision detection
     d._stream_secondary = wp_inner.Stream(device)  # for independent kinematics work
     d._stream_cg = wp_inner.Stream(device)  # for CG prev_grad update
