@@ -3406,7 +3406,7 @@ def solve(m: types.Model, d: types.Data):
       # state before our buffers are created -- avoids ROCm 7.2 mempool corruption.
       if getattr(d, "_hip_coalesce_io_pending", False):
         import warp as _wp
-        _alloc_h = m.opt.solver == SolverType.NEWTON
+        _alloc_h = m.opt.solver == types.SolverType.NEWTON
         _alloc_hfactor = _alloc_h and m.nv > _BLOCK_CHOLESKY_DIM
         d._solver_ctx = create_solver_context(m, d)
         _ls_iters = m.opt.ls_iterations if m.opt.ls_parallel else 0
