@@ -1454,7 +1454,6 @@ def step(m: Model, d: Data):
   # using wp.ScopedCapture(). Our step() just needs to be clean and capturable.
   # Multi-stream is disabled when WP_HIP_GRAPH_ENABLE=1 (set above in fwd_position).
   # Early-exit solver runs during warmup before graph capture.
-    _step_body(m, d)
   _step_body(m, d)
 
 
