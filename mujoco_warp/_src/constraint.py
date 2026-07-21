@@ -2502,7 +2502,11 @@ def _efc_contact_update(cone_type: types.ConeType):
 @event_scope
 def make_constraint(m: types.Model, d: types.Data):
   """Creates constraint jacobians and other supporting data."""
-  efc_nnz = wp.empty((d.nworld,), dtype=int)
+  # AMD Opt A+: reuse pre-allocated buffer for hipGraph pointer stability
+  if hasattr(d, "_scratch_efc_nnz"):
+    efc_nnz = d._scratch_efc_nnz
+  else:
+    efc_nnz = wp.empty((d.nworld,), dtype=int)
 
   wp.launch(
     _zero_constraint_counts,

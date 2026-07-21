@@ -3401,7 +3401,19 @@ def solve(m: types.Model, d: types.Data):
       scatter_Ma = m.opt.integrator != types.IntegratorType.RK4
       island.scatter_island_results(m, d, ctx, scatter_Ma=scatter_Ma)
     else:
-      ctx = create_solver_context(m, d)
+      # AMD Opt A+: reuse pre-allocated solver context to eliminate per-step allocs
+      # (hipGraph COALESCE_IO equivalent — stable pointers required for graph capture)
+      if hasattr(d, "_solver_ctx"):
+        ctx = d._solver_ctx
+        # zero gradient buffers that must start at zero each solve
+        ctx.grad.zero_()
+        ctx.Mgrad.zero_()
+        if ctx.h.shape[0] > 0:
+          ctx.h.zero_()
+        if ctx.hfactor.shape[0] > 0:
+          ctx.hfactor.zero_()
+      else:
+        ctx = create_solver_context(m, d)
       _solve(m, d, ctx)
 
 
@@ -3423,7 +3435,11 @@ def _solve(m: types.Model, d: types.Data, ctx: SolverContext):
     outputs=[ctx.search, ctx.search_dot],
   )
 
-  step_size_cost = wp.empty((d.nworld, m.opt.ls_iterations if m.opt.ls_parallel else 0), dtype=float)
+  # AMD Opt A+: reuse pre-allocated step_size_cost buffer
+  if hasattr(d, "_step_size_cost") and d._step_size_cost.shape == (d.nworld, m.opt.ls_iterations if m.opt.ls_parallel else 0):
+    step_size_cost = d._step_size_cost
+  else:
+    step_size_cost = wp.empty((d.nworld, m.opt.ls_iterations if m.opt.ls_parallel else 0), dtype=float)
 
   nsolving = wp.full(shape=(1,), value=d.nworld, dtype=int)
   if m.opt.iterations != 0 and m.opt.graph_conditional:

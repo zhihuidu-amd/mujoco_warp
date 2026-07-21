@@ -3272,7 +3272,11 @@ def subtree_vel(m: Model, d: Data):
   Computes the linear momentum and angular momentum for each subtree, accumulating
   contributions up the kinematic tree.
   """
-  subtree_bodyvel = wp.empty((d.nworld, m.nbody), dtype=wp.spatial_vector)
+  # AMD Opt A+: reuse pre-allocated buffer for hipGraph pointer stability
+  if hasattr(d, "_scratch_subtree_bodyvel"):
+    subtree_bodyvel = d._scratch_subtree_bodyvel
+  else:
+    subtree_bodyvel = wp.empty((d.nworld, m.nbody), dtype=wp.spatial_vector)
 
   # bodywise quantities
   wp.launch(
@@ -3862,7 +3866,11 @@ def tendon(m: Model, d: Data):
   d.ten_J.zero_()
 
   # Cartesian 3D points fro geom wrap points
-  wrap_geom_xpos = wp.empty((d.nworld, m.nwrap), dtype=wp.spatial_vector)
+  # AMD Opt A+: reuse pre-allocated buffer for hipGraph pointer stability
+  if hasattr(d, "_scratch_wrap_geom_xpos"):
+    wrap_geom_xpos = d._scratch_wrap_geom_xpos
+  else:
+    wrap_geom_xpos = wp.empty((d.nworld, m.nwrap), dtype=wp.spatial_vector)
 
   # process joint tendons
   wp.launch(

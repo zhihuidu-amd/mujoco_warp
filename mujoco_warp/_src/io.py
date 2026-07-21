@@ -1201,6 +1201,39 @@ def make_data(
   return d
 
 
+def _solver_ctx_prealloc(nworld, nv, nv_pad, njmax, alloc_h, alloc_hfactor):
+  """Pre-allocate SolverContext arrays once for hipGraph pointer stability.
+
+  Equivalent to ORT/MIGraphX COALESCE_IO=1: buffers allocated here have stable
+  GPU addresses that hipGraph can capture and replay without re-allocation.
+  """
+  from mujoco_warp._src import solver as _solver_mod
+  return _solver_mod.SolverContext(
+    Jaref=wp.empty((nworld, njmax), dtype=float),
+    search_dot=wp.empty((nworld,), dtype=float),
+    gauss=wp.empty((nworld,), dtype=float),
+    cost=wp.empty((nworld,), dtype=float),
+    prev_cost=wp.empty((nworld,), dtype=float),
+    done=wp.empty((nworld,), dtype=bool),
+    grad=wp.zeros((nworld, nv_pad), dtype=float),
+    grad_dot=wp.empty((nworld,), dtype=float),
+    Mgrad=wp.zeros((nworld, nv_pad), dtype=float),
+    search=wp.empty((nworld, nv), dtype=float),
+    mv=wp.empty((nworld, nv), dtype=float),
+    jv=wp.empty((nworld, njmax), dtype=float),
+    quad=wp.empty((nworld, njmax), dtype=wp.vec3),
+    quad_gauss=wp.empty((nworld,), dtype=wp.vec3),
+    alpha=wp.empty((nworld,), dtype=float),
+    prev_grad=wp.empty((nworld, nv), dtype=float),
+    prev_Mgrad=wp.empty((nworld, nv), dtype=float),
+    beta=wp.empty((nworld,), dtype=float),
+    h=wp.zeros((nworld, nv_pad, nv_pad), dtype=float) if alloc_h else wp.empty((nworld, 0, 0), dtype=float),
+    hfactor=wp.zeros((nworld, nv_pad, nv_pad), dtype=float) if alloc_hfactor else wp.empty((nworld, 0, 0), dtype=float),
+    changed_efc_ids=wp.empty((nworld, njmax), dtype=int) if alloc_h else wp.empty((nworld, 0), dtype=int),
+    changed_efc_count=wp.empty((nworld,), dtype=int) if alloc_h else wp.empty((0,), dtype=int),
+  )
+
+
 def put_data(
   mjm: mujoco.MjModel,
   mjd: mujoco.MjData,
@@ -1481,6 +1514,29 @@ def put_data(
   d._scratch_moment_nnz = wp.zeros((nworld,), dtype=int)
   if getattr(mjm, "nacttrnbody", 0) > 0:
     d._scratch_ncon_trnbody = wp.zeros((nworld, mjm.nacttrnbody), dtype=int)
+
+  # AMD Opt A+ (hipGraph COALESCE_IO equivalent): pre-allocate ALL buffers that
+  # are dynamically allocated inside step() to give hipGraph stable pointers.
+  # Without this, hipGraph capture fails to record device allocations and each
+  # replay re-allocates -- negating all graph-replay benefit (same root cause as
+  # ORT/MIGraphX needing COALESCE_IO=1 alongside HIP_GRAPH_ENABLE=1).
+
+  # solver context (create_solver_context called every step otherwise)
+  _alloc_h = int(getattr(getattr(mjm, "opt", None), "solver", 2)) == 3  # SolverType.NEWTON
+  _alloc_hfactor = _alloc_h and mjm.nv > 64
+  _nv_pad = int(getattr(mjm, "nv_pad", mjm.nv))
+  d._solver_ctx = _solver_ctx_prealloc(nworld, mjm.nv, _nv_pad, d.njmax, _alloc_h, _alloc_hfactor)
+  # step_size_cost (allocated in _solve() every step)
+  _ls_parallel = bool(getattr(getattr(mjm, "opt", None), "ls_parallel", False))
+  _ls_iters = int(getattr(getattr(mjm, "opt", None), "ls_iterations", 10)) if _ls_parallel else 0
+  d._step_size_cost = wp.empty((nworld, _ls_iters), dtype=float)
+  # smooth.py: subtree_bodyvel (subtree_vel, called every step)
+  d._scratch_subtree_bodyvel = wp.empty((nworld, mjm.nbody), dtype=wp.spatial_vector)
+  # smooth.py: wrap_geom_xpos (tendon, called when nwrap > 0)
+  if getattr(mjm, "nwrap", 0) > 0:
+    d._scratch_wrap_geom_xpos = wp.empty((nworld, mjm.nwrap), dtype=wp.spatial_vector)
+  # constraint.py: efc_nnz (make_constraint, called every step)
+  d._scratch_efc_nnz = wp.empty((nworld,), dtype=int)
 
   # AMD Opt D: hipGraph capture of full step().
   # On AMD devices, after 3 warmup calls we capture one step() as a CUDA/HIP graph
