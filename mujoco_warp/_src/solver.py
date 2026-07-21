@@ -3466,7 +3466,12 @@ def _solve(m: types.Model, d: types.Data, ctx: SolverContext):
   else:
     step_size_cost = wp.empty((d.nworld, m.opt.ls_iterations if m.opt.ls_parallel else 0), dtype=float)
 
-  nsolving = wp.full(shape=(1,), value=d.nworld, dtype=int)
+  # AMD Opt A+: reuse pre-allocated nsolving buffer (wp.full allocates during capture)
+  if hasattr(d, "_nsolving"):
+    nsolving = d._nsolving
+    nsolving.fill_(d.nworld)
+  else:
+    nsolving = wp.full(shape=(1,), value=d.nworld, dtype=int)
   if m.opt.iterations != 0 and m.opt.graph_conditional:
     # Note: the iteration kernel (indicated by while_body) is repeatedly launched
     # as long as condition_iteration is not zero.
@@ -3532,7 +3537,12 @@ def _solve_islands(m: types.Model, d: types.Data, ctx: IslandSolverContext):
   )
 
   # nsolving tracks how many active islands still have unconverged globally
-  nsolving = wp.zeros((1,), dtype=int)
+  # AMD Opt A+: reuse pre-allocated buffer (wp.zeros allocates during hipGraph capture)
+  if hasattr(d, "_nsolving_island"):
+    nsolving = d._nsolving_island
+    nsolving.zero_()
+  else:
+    nsolving = wp.zeros((1,), dtype=int)
   wp.launch(
     solve_init_nsolving_island,
     dim=d.nworld,

@@ -1565,8 +1565,13 @@ def put_data(
     d._nsolving_host = wp.empty(1, dtype=int, device="cpu", pinned=True)
     d._nsolving_host_island = wp.empty(1, dtype=int, device="cpu", pinned=True)
 
+    # nsolving GPU counter (wp.full/wp.zeros inside _solve/_solve_islands each step)
+    d._nsolving = wp.empty((1,), dtype=int)
+    d._nsolving_island = wp.empty((1,), dtype=int)
+
     print(f"[INFO] AMD Opt A+: all COALESCE_IO buffers pre-allocated via hipMalloc "
-          f"(solver_ctx, step_size_cost, subtree_bodyvel, efc_nnz, collision_ctx, nsolving_host)")
+          f"(solver_ctx, step_size_cost, subtree_bodyvel, efc_nnz, collision_ctx, "
+          f"nsolving_host, nsolving_gpu)")
   else:
     d._hip_coalesce_io_pending = True  # fallback: lazy alloc in solver.py
 
