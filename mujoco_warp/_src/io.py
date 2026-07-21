@@ -1528,6 +1528,23 @@ def put_data(
   # mjlab has finalized mempool state (mjlab disables mempool after wp.init(),
   # so allocating here would corrupt those buffers on ROCm 7.2).
   d._hip_coalesce_io_pending = True  # triggers lazy alloc in solver.py solve()
+  # Also pre-allocate collision context (create_collision_context called every step)
+  # Do this here (not lazily) since collision runs before solve() in step()
+  # Use non-pooled hipMalloc for stable pointers during graph capture
+  if device.is_hip:
+    import os as _io_os
+    if _io_os.environ.get("WP_HIP_GRAPH_ENABLE", "0") == "1" and nworld > 0:
+      _naconmax = int(getattr(d, "naconmax", 0))
+      if _naconmax > 0:
+        from mujoco_warp._src.collision_core import create_collision_context as _ccc
+        # Allocate with mempool off so we get hipMalloc (stable pointer for graph)
+        if wp.is_mempool_enabled(device):
+          wp.set_mempool_enabled(device, False)
+          d._collision_ctx = _ccc(_naconmax)
+          wp.set_mempool_enabled(device, True)
+        else:
+          d._collision_ctx = _ccc(_naconmax)
+        print(f"[INFO] AMD Opt A+: collision context pre-allocated via hipMalloc (naconmax={_naconmax})")
 
   # AMD Opt D: hipGraph capture of full step().
   # On AMD devices, after 3 warmup calls we capture one step() as a CUDA/HIP graph

@@ -789,7 +789,11 @@ def collision(m: Model, d: Data):
     d.nacon.zero_()
     return
 
-  ctx = create_collision_context(d.naconmax)
+  # AMD Opt A+: reuse pre-allocated collision context for hipGraph pointer stability
+  if hasattr(d, "_collision_ctx"):
+    ctx = d._collision_ctx
+  else:
+    ctx = create_collision_context(d.naconmax)
 
   # zero counters
   wp.launch(_zero_nacon_ncollision, dim=1, outputs=[d.nacon, d.ncollision])
