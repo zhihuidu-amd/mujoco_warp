@@ -3406,6 +3406,15 @@ def solve(m: types.Model, d: types.Data):
       # state before our buffers are created -- avoids ROCm 7.2 mempool corruption.
       if getattr(d, "_hip_coalesce_io_pending", False):
         import warp as _wp
+        _dev = _wp.get_device()
+        # AMD Opt A+ COALESCE_IO: allocate with mempool temporarily DISABLED so
+        # buffers use hipMalloc (stable non-pooled pointers) not hipMallocAsync.
+        # hipMallocAsync pointers trigger wp_free_device_async during hipGraph
+        # capture (error 901). hipMalloc pointers are stable and safe in graphs.
+        # This matches ORT/MIGraphX COALESCE_IO: static buffers, not pooled ones.
+        _mempool_was_enabled = _wp.is_mempool_enabled(_dev)
+        if _mempool_was_enabled:
+          _wp.set_mempool_enabled(_dev, False)
         _alloc_h = m.opt.solver == types.SolverType.NEWTON
         _alloc_hfactor = _alloc_h and m.nv > _BLOCK_CHOLESKY_DIM
         d._solver_ctx = create_solver_context(m, d)
@@ -3415,10 +3424,11 @@ def solve(m: types.Model, d: types.Data):
         if m.nwrap > 0:
           d._scratch_wrap_geom_xpos = _wp.empty((d.nworld, m.nwrap), dtype=_wp.spatial_vector)
         d._scratch_efc_nnz = _wp.empty((d.nworld,), dtype=int)
+        if _mempool_was_enabled:
+          _wp.set_mempool_enabled(_dev, True)
         d._hip_coalesce_io_pending = False
-        _dev = _wp.get_device()
-        print(f"[INFO] AMD Opt A+: COALESCE_IO buffers allocated "
-              f"(mempool={'enabled' if _wp.is_mempool_enabled(_dev) else 'disabled'})")
+        print(f"[INFO] AMD Opt A+: COALESCE_IO buffers allocated via hipMalloc "
+              f"(stable non-pooled pointers for hipGraph capture)")
       if hasattr(d, "_solver_ctx"):
         ctx = d._solver_ctx
         ctx.grad.zero_()
