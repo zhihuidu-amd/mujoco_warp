@@ -1561,8 +1561,12 @@ def put_data(
     if _was_pool:
       wp.set_mempool_enabled(device, True)
     d._hip_coalesce_io_pending = False
+    # pinned CPU buffers for early-exit D2H sync (cpu alloc also fails during capture)
+    d._nsolving_host = wp.empty(1, dtype=int, device="cpu", pinned=True)
+    d._nsolving_host_island = wp.empty(1, dtype=int, device="cpu", pinned=True)
+
     print(f"[INFO] AMD Opt A+: all COALESCE_IO buffers pre-allocated via hipMalloc "
-          f"(solver_ctx, step_size_cost, subtree_bodyvel, efc_nnz, collision_ctx)")
+          f"(solver_ctx, step_size_cost, subtree_bodyvel, efc_nnz, collision_ctx, nsolving_host)")
   else:
     d._hip_coalesce_io_pending = True  # fallback: lazy alloc in solver.py
 
