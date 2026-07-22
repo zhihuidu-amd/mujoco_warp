@@ -1549,11 +1549,13 @@ def put_data(
     d._nsolving = wp.empty((1,), dtype=int)
     d._nsolving_island = wp.empty((1,), dtype=int)
     d._hip_coalesce_io_pending = False
-    # Re-enable mempool so kernel launches use fast hipMallocAsync path
-    if _pool_was_enabled:
-      wp.set_mempool_enabled(device, True)
-    print(f"[INFO] AMD Opt A+: COALESCE_IO complete — ALL put_data() arrays allocated "
-          f"via hipMalloc (.zero_() safe during hipGraph capture), mempool re-enabled.")
+    # NOTE: mempool stays DISABLED for the entire session when WP_HIP_GRAPH_ENABLE=1.
+    # Re-enabling would allow torch.zeros() / PyTorch allocator to use hipMallocAsync
+    # + hipMemsetAsync, which corrupts the HIP context on ROCm 7.2.
+    # With all arrays as hipMalloc (non-pooled), .zero_() uses synchronous hipMemset
+    # which is safe both during and outside hipGraph capture.
+    print(f"[INFO] AMD Opt A+: COALESCE_IO complete — ALL put_data() arrays hipMalloc, "
+          f"mempool remains disabled (hipMemsetAsync corruption prevention on ROCm 7.2).")
   else:
     d._hip_coalesce_io_pending = True
 
