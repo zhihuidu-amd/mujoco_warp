@@ -1485,16 +1485,13 @@ def put_data(
   _hip_graph_enabled = device.is_hip and os.environ.get("WP_HIP_GRAPH_ENABLE", "0") == "1"
   if device.is_hip:
     _pool_was_enabled = wp.is_mempool_enabled(device)
-    if _hip_graph_enabled and _pool_was_enabled:
-      # AMD COALESCE_IO: disable mempool for ALL of put_data() so every array
-      # (d.M, d.cacc, d.sensordata, ctx buffers, etc.) uses hipMalloc.
-      # .zero_() on hipMalloc buffers uses synchronous hipMemset (safe during capture).
-      # .zero_() on hipMallocAsync buffers uses hipMemsetAsync (corrupts ROCm 7.2).
-      # Re-enable mempool after all allocs so kernel launches use fast pool.
-      wp.set_mempool_enabled(device, False)
-      print(f"[INFO] AMD Opt A+: mempool disabled for entire put_data() — all arrays "
-            f"use hipMalloc for hipGraph .zero_() safety (COALESCE_IO pattern).")
-    elif not _hip_graph_enabled and _pool_was_enabled:
+    if _hip_graph_enabled:
+      # hipGraph path (PR#15): keep pool ENABLED.
+      # hipMemsetAsync (.zero_()) is validated safe with graph capture on ROCm 7.2 (PR#15).
+      # COALESCE_IO only prevents dynamic allocs inside capture, not memset operations.
+      print(f"[INFO] Keeping Warp memory pool enabled for hipGraph on HIP device {device.alias}")
+    elif _pool_was_enabled:
+      # Non-graph path: disable pool to avoid hipMemsetAsync corruption
       wp.set_mempool_enabled(device, False)
       print(f"[INFO] Disabled Warp memory pool on HIP/ROCm device {repr(device.alias)} "
             f"(mempool memset is unreliable on ROCm and can corrupt the HIP context, "
@@ -1526,8 +1523,9 @@ def put_data(
   if getattr(mjm, "nacttrnbody", 0) > 0:
     d._scratch_ncon_trnbody = wp.zeros((nworld, mjm.nacttrnbody), dtype=int)
 
-  # AMD Opt A+: allocate extra step()-path buffers (still with mempool disabled
-  # when _hip_graph_enabled, since we disabled it at the top of the HIP block).
+  # AMD Opt A+ COALESCE_IO: pre-allocate step()-path buffers to prevent dynamic
+  # allocs inside ScopedCapture. Pool stays ENABLED (PR#15 validates hipMemsetAsync
+  # with graph capture on ROCm 7.2). COALESCE_IO only prevents allocation, not memset.
   if _hip_graph_enabled:
     _alloc_h = int(getattr(getattr(mjm, "opt", None), "solver", 2)) == 3
     _alloc_hf = _alloc_h and mjm.nv > 64
@@ -1549,13 +1547,8 @@ def put_data(
     d._nsolving = wp.empty((1,), dtype=int)
     d._nsolving_island = wp.empty((1,), dtype=int)
     d._hip_coalesce_io_pending = False
-    # NOTE: mempool stays DISABLED for the entire session when WP_HIP_GRAPH_ENABLE=1.
-    # Re-enabling would allow torch.zeros() / PyTorch allocator to use hipMallocAsync
-    # + hipMemsetAsync, which corrupts the HIP context on ROCm 7.2.
-    # With all arrays as hipMalloc (non-pooled), .zero_() uses synchronous hipMemset
-    # which is safe both during and outside hipGraph capture.
-    print(f"[INFO] AMD Opt A+: COALESCE_IO complete — ALL put_data() arrays hipMalloc, "
-          f"mempool remains disabled (hipMemsetAsync corruption prevention on ROCm 7.2).")
+    print(f"[INFO] AMD Opt A+: COALESCE_IO buffers pre-allocated (pool stays enabled, "
+          f"dynamic allocs eliminated from ScopedCapture)")
   else:
     d._hip_coalesce_io_pending = True
 
