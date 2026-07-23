@@ -1174,9 +1174,12 @@ def _qfrc_actuator_gravcomp_limits(
 def fwd_actuation(m: Model, d: Data):
   """Actuation-dependent computations."""
   if not m.nu or (m.opt.disableflags & DisableBit.ACTUATION):
-    d.act_dot.zero_()
-    d.qfrc_actuator.zero_()
-    d.actuator_force.zero_()
+    if not getattr(d, '_hip_graph_capturing', False):
+      d.act_dot.zero_()
+    if not getattr(d, '_hip_graph_capturing', False):
+      d.qfrc_actuator.zero_()
+    if not getattr(d, '_hip_graph_capturing', False):
+      d.actuator_force.zero_()
     return
 
   # read delayed ctrl (or direct copy if no delay)
@@ -1248,7 +1251,8 @@ def fwd_actuation(m: Model, d: Data):
     )
 
   # TODO(team): optimize performance
-  d.qfrc_actuator.zero_()
+  if not getattr(d, '_hip_graph_capturing', False):
+    d.qfrc_actuator.zero_()
   wp.launch(
     _qfrc_actuator,
     dim=(d.nworld, m.nu),
@@ -1325,13 +1329,15 @@ def forward(m: Model, d: Data):
   energy = m.opt.enableflags & EnableBit.ENERGY
 
   fwd_position(m, d, factorize=False)
-  d.sensordata.zero_()
+  if not getattr(d, '_hip_graph_capturing', False):
+    d.sensordata.zero_()
   sensor.sensor_pos(m, d)
   if energy:
     if m.sensor_e_potential == 0:  # not computed by sensor
       sensor.energy_pos(m, d)
   else:
-    d.energy.zero_()
+    if not getattr(d, '_hip_graph_capturing', False):
+      d.energy.zero_()
 
   fwd_velocity(m, d)
   sensor.sensor_vel(m, d)
@@ -1462,14 +1468,16 @@ def step1(m: Model, d: Data):
   """Advance simulation in two phases: before input is set by user."""
   energy = m.opt.enableflags & EnableBit.ENERGY
   fwd_position(m, d)
-  d.sensordata.zero_()
+  if not getattr(d, '_hip_graph_capturing', False):
+    d.sensordata.zero_()
   sensor.sensor_pos(m, d)
 
   if energy:
     if m.sensor_e_potential == 0:  # not computed by sensor
       sensor.energy_pos(m, d)
   else:
-    d.energy.zero_()
+    if not getattr(d, '_hip_graph_capturing', False):
+      d.energy.zero_()
 
   fwd_velocity(m, d)
   sensor.sensor_vel(m, d)

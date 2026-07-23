@@ -488,7 +488,8 @@ def _linesearch_parallel(m: types.Model, d: types.Data, ctx: SolverContext, cost
 
   # quad_gauss = [gauss, search.T @ Ma - search.T @ qfrc_smooth, 0.5 * search.T @ mv]
   if threads_per_efc > 1:
-    ctx.quad_gauss.zero_()
+    if not getattr(d, '_hip_graph_capturing', False):
+      ctx.quad_gauss.zero_()
 
   wp.launch(
     linesearch_prepare_gauss(m.nv, dofs_per_thread),
@@ -2969,7 +2970,8 @@ def _update_gradient(m: types.Model, d: types.Data, ctx: SolverContext):
   elif m.opt.solver == types.SolverType.NEWTON:
     # h = M + (efc_J.T * efc_D * active) @ efc_J
     if m.is_sparse:
-      ctx.h.zero_()
+      if not getattr(d, '_hip_graph_capturing', False):
+        ctx.h.zero_()
       wp.launch(
         _JTDAJ_sparse,
         dim=(d.nworld, d.njmax),
@@ -3274,7 +3276,8 @@ def _solver_iteration(
   incremental = m.opt.solver == types.SolverType.NEWTON and m.opt.cone != types.ConeType.ELLIPTIC
 
   if incremental:
-    ctx.changed_efc_count.zero_()
+    if not getattr(d, '_hip_graph_capturing', False):
+      ctx.changed_efc_count.zero_()
 
   # AMD Opt 2: Overlap CG prev_grad update with constraint update using pre-cached stream.
   # solve_prev_grad_Mgrad reads ctx.grad/Mgrad (NOT Jaref) — independent of
@@ -3368,7 +3371,8 @@ def init_context(m: types.Model, d: types.Data, ctx: SolverContext | InverseCont
   threads_per_efc = ceil(m.nv / dofs_per_thread)
   # we need to clear the jaref array if we're doing atomic adds.
   if threads_per_efc > 1:
-    ctx.Jaref.zero_()
+    if not getattr(d, '_hip_graph_capturing', False):
+      ctx.Jaref.zero_()
 
   wp.launch(
     solve_init_jaref(m.is_sparse, m.nv, dofs_per_thread),
@@ -3390,7 +3394,8 @@ def init_context(m: types.Model, d: types.Data, ctx: SolverContext | InverseCont
 def solve(m: types.Model, d: types.Data):
   if d.njmax == 0 or m.nv == 0:
     wp.copy(d.qacc, d.qacc_smooth)
-    d.solver_niter.fill_(0)
+    if not getattr(d, '_hip_graph_capturing', False):
+      d.solver_niter.fill_(0)
   else:
     if m.ntree > 1 and not (m.opt.disableflags & types.DisableBit.ISLAND):
       ctx = create_island_solver_context(m, d)
@@ -3431,12 +3436,16 @@ def solve(m: types.Model, d: types.Data):
               f"(stable non-pooled pointers for hipGraph capture)")
       if hasattr(d, "_solver_ctx"):
         ctx = d._solver_ctx
-        ctx.grad.zero_()
-        ctx.Mgrad.zero_()
+        if not getattr(d, '_hip_graph_capturing', False):
+          ctx.grad.zero_()
+        if not getattr(d, '_hip_graph_capturing', False):
+          ctx.Mgrad.zero_()
         if ctx.h.shape[0] > 0:
-          ctx.h.zero_()
+          if not getattr(d, '_hip_graph_capturing', False):
+            ctx.h.zero_()
         if ctx.hfactor.shape[0] > 0:
-          ctx.hfactor.zero_()
+          if not getattr(d, '_hip_graph_capturing', False):
+            ctx.hfactor.zero_()
       else:
         ctx = create_solver_context(m, d)
       _solve(m, d, ctx)
@@ -5124,7 +5133,8 @@ def _cholesky_factorize_solve_island(
 def init_context_island(m: types.Model, d: types.Data, ctx: IslandSolverContext):
   """Initialize island solver context."""
   # Init per-island scalars
-  d.solver_niter.zero_()
+  if not getattr(d, '_hip_graph_capturing', False):
+    d.solver_niter.zero_()
   wp.launch(
     solve_init_efc_island,
     dim=(d.nworld, m.ntree),
@@ -5217,7 +5227,8 @@ def _update_constraint_island(m: types.Model, d: types.Data, ctx: IslandSolverCo
 
   # qfrc_constraint = J^T @ force
   if m.is_sparse:
-    d.iqfrc_constraint.zero_()
+    if not getattr(d, '_hip_graph_capturing', False):
+      d.iqfrc_constraint.zero_()
     wp.launch(
       update_constraint_init_qfrc_constraint_sparse_island,
       dim=(d.nworld, d.njmax),
@@ -5273,7 +5284,8 @@ def _update_constraint_island(m: types.Model, d: types.Data, ctx: IslandSolverCo
 def _update_gradient_island(m: types.Model, d: types.Data, ctx: IslandSolverContext):
   """Update gradient for island solver."""
   # Zero grad_dot per island
-  ctx.grad_dot.zero_()
+  if not getattr(d, '_hip_graph_capturing', False):
+    ctx.grad_dot.zero_()
 
   # grad = Ma - frc_smooth - frc_constraint, accumulate grad_dot
   wp.launch(
@@ -5305,7 +5317,8 @@ def _update_gradient_island(m: types.Model, d: types.Data, ctx: IslandSolverCont
 def _update_gradient_incremental_island(m: types.Model, d: types.Data, ctx: IslandSolverContext):
   """Full Newton gradient update for islands: build H, factorize, solve."""
   # Zero grad_dot per island
-  ctx.grad_dot.zero_()
+  if not getattr(d, '_hip_graph_capturing', False):
+    ctx.grad_dot.zero_()
 
   # grad = Ma - frc_smooth - frc_constraint, accumulate grad_dot
   wp.launch(
@@ -5323,7 +5336,8 @@ def _update_gradient_incremental_island(m: types.Model, d: types.Data, ctx: Isla
   )
 
   # Build H = qM + Jᵀ·D·J
-  ctx.h.zero_()
+  if not getattr(d, '_hip_graph_capturing', False):
+    ctx.h.zero_()
 
   # JTDAJ
   wp.launch(
@@ -5587,7 +5601,8 @@ def _solver_iteration_island(
     )
 
   # Zero search_dot
-  ctx.search_dot.zero_()
+  if not getattr(d, '_hip_graph_capturing', False):
+    ctx.search_dot.zero_()
 
   # Search update
   wp.launch(
@@ -5606,7 +5621,8 @@ def _solver_iteration_island(
   )
 
   # Convergence check
-  d.solver_niter.zero_()
+  if not getattr(d, '_hip_graph_capturing', False):
+    d.solver_niter.zero_()
   wp.launch(
     solve_done_island,
     dim=(d.nworld, m.ntree),

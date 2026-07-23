@@ -936,7 +936,8 @@ def crb(m: Model, d: Data):
     body_tree = m.body_tree[i]
     wp.launch(_crb_accumulate, dim=(d.nworld, body_tree.size), inputs=[m.body_parentid, d.crb, body_tree], outputs=[d.crb])
 
-  d.M.zero_()
+  if not getattr(d, '_hip_graph_capturing', False):
+    d.M.zero_()
   if m.is_sparse:
     wp.launch(
       _M_sparse,
@@ -1149,7 +1150,8 @@ def _cacc_world(
 
 def _rne_cacc_world(m: Model, d: Data):
   if m.opt.disableflags & DisableBit.GRAVITY:
-    d.cacc.zero_()
+    if not getattr(d, '_hip_graph_capturing', False):
+      d.cacc.zero_()
   else:
     wp.launch(_cacc_world, dim=[d.nworld], inputs=[m.opt.gravity], outputs=[d.cacc])
 
@@ -3862,8 +3864,10 @@ def tendon(m: Model, d: Data):
   if not m.ntendon:
     return
 
-  d.ten_length.zero_()
-  d.ten_J.zero_()
+  if not getattr(d, '_hip_graph_capturing', False):
+    d.ten_length.zero_()
+  if not getattr(d, '_hip_graph_capturing', False):
+    d.ten_J.zero_()
 
   # Cartesian 3D points fro geom wrap points
   # AMD Opt A+: reuse pre-allocated buffer for hipGraph pointer stability
@@ -3895,8 +3899,10 @@ def tendon(m: Model, d: Data):
   spatial_geom = m.wrap_geom_adr.size > 0
 
   if spatial_site or spatial_geom:
-    d.wrap_xpos.zero_()
-    d.wrap_obj.zero_()
+    if not getattr(d, '_hip_graph_capturing', False):
+      d.wrap_xpos.zero_()
+    if not getattr(d, '_hip_graph_capturing', False):
+      d.wrap_obj.zero_()
 
   # process spatial site tendons
   wp.launch(

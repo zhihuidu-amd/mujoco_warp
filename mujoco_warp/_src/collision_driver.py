@@ -786,7 +786,8 @@ def collision(m: Model, d: Data):
   via `m.opt.disableflags` or if `d.nacon` is 0.
   """
   if d.naconmax == 0 or m.opt.disableflags & (DisableBit.CONSTRAINT | DisableBit.CONTACT):
-    d.nacon.zero_()
+    if not getattr(d, '_hip_graph_capturing', False):
+      d.nacon.zero_()
     return
 
   # AMD Opt A+: reuse pre-allocated collision context for hipGraph pointer stability
