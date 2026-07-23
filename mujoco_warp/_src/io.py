@@ -1485,11 +1485,12 @@ def put_data(
   _hip_graph_enabled = device.is_hip and os.environ.get("WP_HIP_GRAPH_ENABLE", "0") == "1"
   if device.is_hip:
     _pool_was_enabled = wp.is_mempool_enabled(device)
-    if _hip_graph_enabled:
-      # hipGraph path (PR#15): keep pool ENABLED.
-      # hipMemsetAsync (.zero_()) is validated safe with graph capture on ROCm 7.2 (PR#15).
-      # COALESCE_IO only prevents dynamic allocs inside capture, not memset operations.
-      print(f"[INFO] Keeping Warp memory pool enabled for hipGraph on HIP device {device.alias}")
+    if _hip_graph_enabled and _pool_was_enabled:
+      # Disable pool so ALL put_data() arrays use hipMalloc (non-pooled).
+      # .zero_() on hipMalloc uses synchronous hipMemset — safe as hipGraph nodes.
+      # Pool re-enabled after all allocs so kernel launches use fast hipMallocAsync.
+      wp.set_mempool_enabled(device, False)
+      print(f"[INFO] AMD COALESCE_IO: pool disabled for put_data() — arrays via hipMalloc")
     elif _pool_was_enabled:
       # Non-graph path: disable pool to avoid hipMemsetAsync corruption
       wp.set_mempool_enabled(device, False)
@@ -1547,8 +1548,12 @@ def put_data(
     d._nsolving = wp.empty((1,), dtype=int)
     d._nsolving_island = wp.empty((1,), dtype=int)
     d._hip_coalesce_io_pending = False
-    print(f"[INFO] AMD Opt A+: COALESCE_IO buffers pre-allocated (pool stays enabled, "
-          f"dynamic allocs eliminated from ScopedCapture)")
+    # Re-enable pool now — all data arrays are hipMalloc, subsequent kernel
+    # launches can use fast hipMallocAsync. create_graph() runs after this.
+    if _hip_graph_enabled and _pool_was_enabled:
+      wp.set_mempool_enabled(device, True)
+      print(f"[INFO] AMD Opt A+: pool re-enabled for kernel launches (data arrays = hipMalloc)")
+    print(f"[INFO] AMD Opt A+: COALESCE_IO complete")
   else:
     d._hip_coalesce_io_pending = True
 
