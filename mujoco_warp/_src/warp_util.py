@@ -142,7 +142,14 @@ def cache_kernel(func):
 
 
 def check_toolkit_driver():
-  wp.init()
+  # AMD: skip wp.init() if warp runtime is already initialized.
+  # Double wp.init() (triggered by mjlab "import warp as wp" + this call)
+  # causes null pointer GPU fault on ROCm when PR#15 enables mempool at init.
+  import warp._src.context as _wp_ctx
+  if _wp_ctx.runtime is not None:
+    pass  # already initialized -- skip
+  else:
+    wp.init()
   device = wp.get_device()
   if not device.is_cuda:
     return
