@@ -142,19 +142,7 @@ def cache_kernel(func):
 
 
 def check_toolkit_driver():
-  # AMD: trace initialization state for debugging double-init crash
-  import os as _os
-  import warp._src.context as _wp_ctx
-  _hip_graph = _os.environ.get("WP_HIP_GRAPH_ENABLE", "0") == "1"
-  _rt = _wp_ctx.runtime
-  _rt_devices = len(_rt.devices) if _rt and hasattr(_rt, "devices") else -1
-  print(f"[CTD] WP_HIP_GRAPH_ENABLE={_hip_graph} runtime={_rt is not None} devices={_rt_devices}")
-  if _rt is not None and _rt_devices > 0:
-    print("[CTD] Skipping wp.init() — already initialized")
-    pass
-  else:
-    print("[CTD] Calling wp.init()")
-    wp.init()
+  wp.init()  # idempotent — safe to call multiple times in PR#15
   device = wp.get_device()
   if not device.is_cuda:
     return
