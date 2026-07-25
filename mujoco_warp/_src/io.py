@@ -1485,11 +1485,13 @@ def put_data(
   _hip_graph_enabled = device.is_hip and os.environ.get("WP_HIP_GRAPH_ENABLE", "0") == "1"
   if device.is_hip:
     _pool_was_enabled = wp.is_mempool_enabled(device)
-    if _hip_graph_enabled:
-      # Pool stays ENABLED — both hipMalloc and hipMallocAsync .zero_() work correctly
-      # in ScopedCapture on ROCm 7.2 with PR#15 (confirmed by capture-test).
-      print(f"[INFO] Keeping pool enabled for hipGraph on {device.alias}")
-    elif _pool_was_enabled:
+    if _pool_was_enabled:
+      # Always disable mempool for normal execution — hipMallocAsync is unreliable on ROCm.
+      # When WP_HIP_GRAPH_ENABLE=1, the mjlab Sim.create_graph() enables mempool locally
+      # around ScopedCapture and disables it immediately after.
+      # Never keep mempool enabled globally — it causes null ptr faults during step().
+      pass
+    if _pool_was_enabled:
       # Non-graph path: disable pool to avoid hipMemsetAsync corruption
       wp.set_mempool_enabled(device, False)
       print(f"[INFO] Disabled Warp memory pool on HIP/ROCm device {repr(device.alias)} "
