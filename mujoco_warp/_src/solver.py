@@ -488,6 +488,7 @@ def _linesearch_parallel(m: types.Model, d: types.Data, ctx: SolverContext, cost
 
   # quad_gauss = [gauss, search.T @ Ma - search.T @ qfrc_smooth, 0.5 * search.T @ mv]
   if threads_per_efc > 1:
+    if not getattr(d, '_hip_graph_capturing', False):
       ctx.quad_gauss.zero_()
 
   wp.launch(
@@ -2969,6 +2970,7 @@ def _update_gradient(m: types.Model, d: types.Data, ctx: SolverContext):
   elif m.opt.solver == types.SolverType.NEWTON:
     # h = M + (efc_J.T * efc_D * active) @ efc_J
     if m.is_sparse:
+      if not getattr(d, '_hip_graph_capturing', False):
         ctx.h.zero_()
       wp.launch(
         _JTDAJ_sparse,
@@ -3274,6 +3276,7 @@ def _solver_iteration(
   incremental = m.opt.solver == types.SolverType.NEWTON and m.opt.cone != types.ConeType.ELLIPTIC
 
   if incremental:
+    if not getattr(d, '_hip_graph_capturing', False):
       ctx.changed_efc_count.zero_()
 
   # AMD Opt 2: Overlap CG prev_grad update with constraint update using pre-cached stream.
@@ -3368,6 +3371,7 @@ def init_context(m: types.Model, d: types.Data, ctx: SolverContext | InverseCont
   threads_per_efc = ceil(m.nv / dofs_per_thread)
   # we need to clear the jaref array if we're doing atomic adds.
   if threads_per_efc > 1:
+    if not getattr(d, '_hip_graph_capturing', False):
       ctx.Jaref.zero_()
 
   wp.launch(
@@ -3390,6 +3394,7 @@ def init_context(m: types.Model, d: types.Data, ctx: SolverContext | InverseCont
 def solve(m: types.Model, d: types.Data):
   if d.njmax == 0 or m.nv == 0:
     wp.copy(d.qacc, d.qacc_smooth)
+    if not getattr(d, '_hip_graph_capturing', False):
       d.solver_niter.fill_(0)
   else:
     if m.ntree > 1 and not (m.opt.disableflags & types.DisableBit.ISLAND):
@@ -3431,11 +3436,15 @@ def solve(m: types.Model, d: types.Data):
               f"(stable non-pooled pointers for hipGraph capture)")
       if hasattr(d, "_solver_ctx"):
         ctx = d._solver_ctx
+        if not getattr(d, '_hip_graph_capturing', False):
           ctx.grad.zero_()
+        if not getattr(d, '_hip_graph_capturing', False):
           ctx.Mgrad.zero_()
         if ctx.h.shape[0] > 0:
+          if not getattr(d, '_hip_graph_capturing', False):
             ctx.h.zero_()
         if ctx.hfactor.shape[0] > 0:
+          if not getattr(d, '_hip_graph_capturing', False):
             ctx.hfactor.zero_()
       else:
         ctx = create_solver_context(m, d)
@@ -5124,6 +5133,7 @@ def _cholesky_factorize_solve_island(
 def init_context_island(m: types.Model, d: types.Data, ctx: IslandSolverContext):
   """Initialize island solver context."""
   # Init per-island scalars
+  if not getattr(d, '_hip_graph_capturing', False):
     d.solver_niter.zero_()
   wp.launch(
     solve_init_efc_island,
@@ -5217,6 +5227,7 @@ def _update_constraint_island(m: types.Model, d: types.Data, ctx: IslandSolverCo
 
   # qfrc_constraint = J^T @ force
   if m.is_sparse:
+    if not getattr(d, '_hip_graph_capturing', False):
       d.iqfrc_constraint.zero_()
     wp.launch(
       update_constraint_init_qfrc_constraint_sparse_island,
@@ -5273,6 +5284,7 @@ def _update_constraint_island(m: types.Model, d: types.Data, ctx: IslandSolverCo
 def _update_gradient_island(m: types.Model, d: types.Data, ctx: IslandSolverContext):
   """Update gradient for island solver."""
   # Zero grad_dot per island
+  if not getattr(d, '_hip_graph_capturing', False):
     ctx.grad_dot.zero_()
 
   # grad = Ma - frc_smooth - frc_constraint, accumulate grad_dot
@@ -5305,6 +5317,7 @@ def _update_gradient_island(m: types.Model, d: types.Data, ctx: IslandSolverCont
 def _update_gradient_incremental_island(m: types.Model, d: types.Data, ctx: IslandSolverContext):
   """Full Newton gradient update for islands: build H, factorize, solve."""
   # Zero grad_dot per island
+  if not getattr(d, '_hip_graph_capturing', False):
     ctx.grad_dot.zero_()
 
   # grad = Ma - frc_smooth - frc_constraint, accumulate grad_dot
@@ -5323,6 +5336,7 @@ def _update_gradient_incremental_island(m: types.Model, d: types.Data, ctx: Isla
   )
 
   # Build H = qM + Jᵀ·D·J
+  if not getattr(d, '_hip_graph_capturing', False):
     ctx.h.zero_()
 
   # JTDAJ
@@ -5587,6 +5601,7 @@ def _solver_iteration_island(
     )
 
   # Zero search_dot
+  if not getattr(d, '_hip_graph_capturing', False):
     ctx.search_dot.zero_()
 
   # Search update
@@ -5606,6 +5621,7 @@ def _solver_iteration_island(
   )
 
   # Convergence check
+  if not getattr(d, '_hip_graph_capturing', False):
     d.solver_niter.zero_()
   wp.launch(
     solve_done_island,
