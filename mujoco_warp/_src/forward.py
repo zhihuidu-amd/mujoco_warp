@@ -47,7 +47,7 @@ from mujoco_warp._src.types import vec10f
 from mujoco_warp._src.warp_util import cache_kernel
 from mujoco_warp._src.warp_util import event_scope
 
-wp.set_module_options({"enable_backward": False})
+# AMD: disabled — causes async null ptr GPU fault at import on ROCm 7.2
 
 
 @wp.kernel
