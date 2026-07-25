@@ -1174,12 +1174,9 @@ def _qfrc_actuator_gravcomp_limits(
 def fwd_actuation(m: Model, d: Data):
   """Actuation-dependent computations."""
   if not m.nu or (m.opt.disableflags & DisableBit.ACTUATION):
-    if not getattr(d, '_hip_graph_capturing', False):
-      d.act_dot.zero_()
-    if not getattr(d, '_hip_graph_capturing', False):
-      d.qfrc_actuator.zero_()
-    if not getattr(d, '_hip_graph_capturing', False):
-      d.actuator_force.zero_()
+    d.act_dot.zero_()
+    d.qfrc_actuator.zero_()
+    d.actuator_force.zero_()
     return
 
   # read delayed ctrl (or direct copy if no delay)

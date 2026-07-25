@@ -2970,8 +2970,7 @@ def _update_gradient(m: types.Model, d: types.Data, ctx: SolverContext):
   elif m.opt.solver == types.SolverType.NEWTON:
     # h = M + (efc_J.T * efc_D * active) @ efc_J
     if m.is_sparse:
-      if not getattr(d, '_hip_graph_capturing', False):
-        ctx.h.zero_()
+      ctx.h.zero_()
       wp.launch(
         _JTDAJ_sparse,
         dim=(d.nworld, d.njmax),
