@@ -3060,7 +3060,6 @@ def make_constraint(m: types.Model, d: types.Data):
           ],
         )
       else:
-        if not getattr(d, '_hip_graph_capturing', False):
           d.efc.Jqvel.zero_()
         tile_size = m.block_dim.contact_jac_tiled
         n_dof_blocks = (m.nv_pad + tile_size - 1) // tile_size

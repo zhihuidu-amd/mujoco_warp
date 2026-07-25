@@ -786,7 +786,6 @@ def collision(m: Model, d: Data):
   via `m.opt.disableflags` or if `d.nacon` is 0.
   """
   if d.naconmax == 0 or m.opt.disableflags & (DisableBit.CONSTRAINT | DisableBit.CONTACT):
-    if not getattr(d, '_hip_graph_capturing', False):
       d.nacon.zero_()
     return
 
