@@ -585,12 +585,20 @@ def sap_broadphase(m: Model, d: Data, ctx: CollisionContext):
   direction = wp.vec3(0.5935, 0.7790, 0.1235)
   direction = wp.normalize(direction)
 
-  projection_lower = wp.empty((d.nworld, m.ngeom, 2), dtype=float)
-  projection_upper = wp.empty((d.nworld, m.ngeom), dtype=float)
-  sort_index = wp.empty((d.nworld, m.ngeom, 2), dtype=int)
-  range_ = wp.empty((d.nworld, m.ngeom), dtype=int)
-  cumulative_sum = wp.empty((d.nworld, m.ngeom), dtype=int)
-  segmented_index = wp.empty(d.nworld + 1 if m.opt.broadphase == BroadphaseType.SAP_SEGMENTED else 0, dtype=int)
+  # AMD COALESCE_IO: pre-allocate SAP buffers
+  if not hasattr(d, '_sap_projection_lower') or d._sap_projection_lower is None:
+    d._sap_projection_lower = wp.empty((d.nworld, m.ngeom, 2), dtype=float)
+    d._sap_projection_upper = wp.empty((d.nworld, m.ngeom), dtype=float)
+    d._sap_sort_index = wp.empty((d.nworld, m.ngeom, 2), dtype=int)
+    d._sap_range = wp.empty((d.nworld, m.ngeom), dtype=int)
+    d._sap_cumulative_sum = wp.empty((d.nworld, m.ngeom), dtype=int)
+    d._sap_segmented_index = wp.empty(d.nworld + 1, dtype=int)
+  projection_lower = d._sap_projection_lower
+  projection_upper = d._sap_projection_upper
+  sort_index = d._sap_sort_index
+  range_ = d._sap_range
+  cumulative_sum = d._sap_cumulative_sum
+  segmented_index = d._sap_segmented_index
 
   wp.launch(
     kernel=_sap_project(m.opt.broadphase),

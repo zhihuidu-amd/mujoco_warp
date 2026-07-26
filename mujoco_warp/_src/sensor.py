@@ -2589,7 +2589,11 @@ def sensor_acc(m: Model, d: Data):
   sensor_contact_matchid = d._sensor_contact_matchid
   sensor_contact_direction = d._sensor_contact_direction
   if m.nsensorcontact:
-    sensor_contact_criteria = wp.empty((d.nworld, m.nsensorcontact, m.opt.contact_sensor_maxmatch), dtype=float)
+    if not hasattr(d, '_sensor_contact_criteria') or d._sensor_contact_criteria is None:
+      _nm2 = max(m.nsensorcontact, 1)
+      _cm2 = max(m.opt.contact_sensor_maxmatch, 1) if hasattr(m.opt, 'contact_sensor_maxmatch') else 1
+      d._sensor_contact_criteria = wp.empty((d.nworld, _nm2, _cm2), dtype=float)
+    sensor_contact_criteria = d._sensor_contact_criteria
     # TODO(team): fill_ operations in one kernel?
     sensor_contact_nmatch.fill_(0)
     sensor_contact_matchid.fill_(-1)
