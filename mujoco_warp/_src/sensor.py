@@ -781,11 +781,12 @@ def sensor_pos(m: Model, d: Data):
   # rangefinder
   # AMD COALESCE_IO: pre-allocate to prevent dynamic alloc inside hipGraph capture
   if not hasattr(d, '_rangefinder_dist') or d._rangefinder_dist is None:
-    d._rangefinder_dist = wp.empty((d.nworld, max(m.nrangefinder, 1)), dtype=float)
-    d._rangefinder_pnt = wp.empty((d.nworld, max(m.nrangefinder, 1)), dtype=wp.vec3)
-    d._rangefinder_vec = wp.empty((d.nworld, max(m.nrangefinder, 1)), dtype=wp.vec3)
-    d._rangefinder_geomid = wp.empty((d.nworld, max(m.nrangefinder, 1)), dtype=int)
-    d._rangefinder_normal = wp.empty((d.nworld, max(m.nrangefinder, 1)), dtype=wp.vec3)
+    # Use exact sizes — zero-size arrays have valid ptrs via warp bf6a80c fix
+    d._rangefinder_dist = wp.empty((d.nworld, m.nrangefinder), dtype=float)
+    d._rangefinder_pnt = wp.empty((d.nworld, m.nrangefinder), dtype=wp.vec3)
+    d._rangefinder_vec = wp.empty((d.nworld, m.nrangefinder), dtype=wp.vec3)
+    d._rangefinder_geomid = wp.empty((d.nworld, m.nrangefinder), dtype=int)
+    d._rangefinder_normal = wp.empty((d.nworld, m.nrangefinder), dtype=wp.vec3)
   rangefinder_dist = d._rangefinder_dist
   if m.sensor_rangefinder_adr.size > 0:
     rangefinder_pnt = d._rangefinder_pnt
@@ -823,7 +824,7 @@ def sensor_pos(m: Model, d: Data):
 
   # collision sensors (distance, normal, fromto)
   if not hasattr(d, '_sensor_collision') or d._sensor_collision is None:
-    d._sensor_collision = wp.full((d.nworld, max(m.nsensorcollision, 1), 8, 7), 1.0e32, dtype=float)
+    d._sensor_collision = wp.full((d.nworld, m.nsensorcollision, 8, 7), 1.0e32, dtype=float)
   else:
     d._sensor_collision.fill_(1.0e32)
   sensor_collision = d._sensor_collision
@@ -2514,8 +2515,8 @@ def sensor_acc(m: Model, d: Data):
   )
 
   if not hasattr(d, '_weld_geom_count') or d._weld_geom_count is None:
-    d._weld_geom_count = wp.zeros((d.nworld, max(m.nbody, 1)), dtype=int)
-    d._weld_geom_list = wp.full((d.nworld, max(m.nbody, 1), MJ_MAXCONPAIR), -1, dtype=int)
+    d._weld_geom_count = wp.zeros((d.nworld, m.nbody), dtype=int)
+    d._weld_geom_list = wp.full((d.nworld, m.nbody, MJ_MAXCONPAIR), -1, dtype=int)
   else:
     d._weld_geom_count.zero_()
     d._weld_geom_list.fill_(-1)
@@ -2579,8 +2580,8 @@ def sensor_acc(m: Model, d: Data):
     ],
   )
 
-  _nm = max(m.nsensorcontact, 1)
-  _cm = max(m.opt.contact_sensor_maxmatch, 1) if hasattr(m.opt, 'contact_sensor_maxmatch') else 1
+  _nm = m.nsensorcontact
+  _cm = m.opt.contact_sensor_maxmatch if hasattr(m.opt, 'contact_sensor_maxmatch') else 0
   if not hasattr(d, '_sensor_contact_nmatch') or d._sensor_contact_nmatch is None:
     d._sensor_contact_nmatch = wp.empty((d.nworld, _nm), dtype=int)
     d._sensor_contact_matchid = wp.empty((d.nworld, _nm, _cm), dtype=int)
