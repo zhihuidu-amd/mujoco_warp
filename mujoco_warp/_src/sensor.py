@@ -779,12 +779,19 @@ def sensor_pos(m: Model, d: Data):
     return
 
   # rangefinder
-  rangefinder_dist = wp.empty((d.nworld, m.nrangefinder), dtype=float)
+  # AMD COALESCE_IO: pre-allocate to prevent dynamic alloc inside hipGraph capture
+  if not hasattr(d, '_rangefinder_dist') or d._rangefinder_dist is None:
+    d._rangefinder_dist = wp.empty((d.nworld, max(m.nrangefinder, 1)), dtype=float)
+    d._rangefinder_pnt = wp.empty((d.nworld, max(m.nrangefinder, 1)), dtype=wp.vec3)
+    d._rangefinder_vec = wp.empty((d.nworld, max(m.nrangefinder, 1)), dtype=wp.vec3)
+    d._rangefinder_geomid = wp.empty((d.nworld, max(m.nrangefinder, 1)), dtype=int)
+    d._rangefinder_normal = wp.empty((d.nworld, max(m.nrangefinder, 1)), dtype=wp.vec3)
+  rangefinder_dist = d._rangefinder_dist
   if m.sensor_rangefinder_adr.size > 0:
-    rangefinder_pnt = wp.empty((d.nworld, m.nrangefinder), dtype=wp.vec3)
-    rangefinder_vec = wp.empty((d.nworld, m.nrangefinder), dtype=wp.vec3)
-    rangefinder_geomid = wp.empty((d.nworld, m.nrangefinder), dtype=int)
-    rangefinder_normal = wp.empty((d.nworld, m.nrangefinder), dtype=wp.vec3)
+    rangefinder_pnt = d._rangefinder_pnt
+    rangefinder_vec = d._rangefinder_vec
+    rangefinder_geomid = d._rangefinder_geomid
+    rangefinder_normal = d._rangefinder_normal
 
     # get position and direction
     wp.launch(
@@ -815,7 +822,11 @@ def sensor_pos(m: Model, d: Data):
     energy_vel(m, d)
 
   # collision sensors (distance, normal, fromto)
-  sensor_collision = wp.full((d.nworld, m.nsensorcollision, 8, 7), 1.0e32, dtype=float)
+  if not hasattr(d, '_sensor_collision') or d._sensor_collision is None:
+    d._sensor_collision = wp.full((d.nworld, max(m.nsensorcollision, 1), 8, 7), 1.0e32, dtype=float)
+  else:
+    d._sensor_collision.fill_(1.0e32)
+  sensor_collision = d._sensor_collision
   if m.nsensorcollision:
     wp.launch(
       _sensor_collision,
@@ -2502,8 +2513,14 @@ def sensor_acc(m: Model, d: Data):
     ],
   )
 
-  weld_geom_count = wp.zeros((d.nworld, m.nbody), dtype=int)
-  weld_geom_list = wp.full((d.nworld, m.nbody, MJ_MAXCONPAIR), -1, dtype=int)
+  if not hasattr(d, '_weld_geom_count') or d._weld_geom_count is None:
+    d._weld_geom_count = wp.zeros((d.nworld, max(m.nbody, 1)), dtype=int)
+    d._weld_geom_list = wp.full((d.nworld, max(m.nbody, 1), MJ_MAXCONPAIR), -1, dtype=int)
+  else:
+    d._weld_geom_count.zero_()
+    d._weld_geom_list.fill_(-1)
+  weld_geom_count = d._weld_geom_count
+  weld_geom_list = d._weld_geom_list
   wp.launch(
     _preprocess_tactile_contacts,
     dim=d.naconmax,
@@ -2562,9 +2579,15 @@ def sensor_acc(m: Model, d: Data):
     ],
   )
 
-  sensor_contact_nmatch = wp.empty((d.nworld, m.nsensorcontact), dtype=int)
-  sensor_contact_matchid = wp.empty((d.nworld, m.nsensorcontact, m.opt.contact_sensor_maxmatch), dtype=int)
-  sensor_contact_direction = wp.empty((d.nworld, m.nsensorcontact, m.opt.contact_sensor_maxmatch), dtype=float)
+  _nm = max(m.nsensorcontact, 1)
+  _cm = max(m.opt.contact_sensor_maxmatch, 1) if hasattr(m.opt, 'contact_sensor_maxmatch') else 1
+  if not hasattr(d, '_sensor_contact_nmatch') or d._sensor_contact_nmatch is None:
+    d._sensor_contact_nmatch = wp.empty((d.nworld, _nm), dtype=int)
+    d._sensor_contact_matchid = wp.empty((d.nworld, _nm, _cm), dtype=int)
+    d._sensor_contact_direction = wp.empty((d.nworld, _nm, _cm), dtype=float)
+  sensor_contact_nmatch = d._sensor_contact_nmatch
+  sensor_contact_matchid = d._sensor_contact_matchid
+  sensor_contact_direction = d._sensor_contact_direction
   if m.nsensorcontact:
     sensor_contact_criteria = wp.empty((d.nworld, m.nsensorcontact, m.opt.contact_sensor_maxmatch), dtype=float)
     # TODO(team): fill_ operations in one kernel?
