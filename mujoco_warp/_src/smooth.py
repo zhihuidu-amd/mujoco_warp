@@ -1919,11 +1919,14 @@ def tendon_bias(m: Model, d: Data, qfrc: wp.array2d[float]):
   """
   # time derivative of tendon Jacobian
   # AMD Opt A: reuse pre-allocated scratch buffer instead of wp.zeros() each step
-  if hasattr(d, "_scratch_ten_Jdot") and d._scratch_ten_Jdot.shape == (d.nworld, m.nJten):
-    ten_Jdot = d._scratch_ten_Jdot
-    ten_Jdot.zero_()
-  else:
-    ten_Jdot = wp.zeros((d.nworld, m.nJten), dtype=float)
+  if not hasattr(d, "_scratch_ten_Jdot") or d._scratch_ten_Jdot.shape != (d.nworld, m.nJten):
+    import warp as _wp_t; _dev_t = _wp_t.get_device()
+    _p = _wp_t.is_mempool_enabled(_dev_t)
+    if _p: _wp_t.set_mempool_enabled(_dev_t, False)
+    d._scratch_ten_Jdot = wp.zeros((d.nworld, m.nJten), dtype=float)
+    if _p: _wp_t.set_mempool_enabled(_dev_t, True)
+  ten_Jdot = d._scratch_ten_Jdot
+  ten_Jdot.zero_()
   wp.launch(
     _tendon_dot,
     dim=(d.nworld, m.ntendon),
@@ -1956,11 +1959,14 @@ def tendon_bias(m: Model, d: Data, qfrc: wp.array2d[float]):
 
   # tendon bias force coefficients
   # AMD Opt A: reuse pre-allocated scratch buffer instead of wp.zeros() each step
-  if hasattr(d, "_scratch_ten_bias_coef") and d._scratch_ten_bias_coef.shape == (d.nworld, m.ntendon):
-    ten_bias_coef = d._scratch_ten_bias_coef
-    ten_bias_coef.zero_()
-  else:
-    ten_bias_coef = wp.zeros((d.nworld, m.ntendon), dtype=float)
+  if not hasattr(d, "_scratch_ten_bias_coef") or d._scratch_ten_bias_coef.shape != (d.nworld, m.ntendon):
+    import warp as _wp_t; _dev_t = _wp_t.get_device()
+    _p = _wp_t.is_mempool_enabled(_dev_t)
+    if _p: _wp_t.set_mempool_enabled(_dev_t, False)
+    d._scratch_ten_bias_coef = wp.zeros((d.nworld, m.ntendon), dtype=float)
+    if _p: _wp_t.set_mempool_enabled(_dev_t, True)
+  ten_bias_coef = d._scratch_ten_bias_coef
+  ten_bias_coef.zero_()
   wp.launch(
     _tendon_bias_coef,
     dim=(d.nworld, m.ntendon, m.max_ten_J_rownnz),

@@ -3429,16 +3429,19 @@ def solve(m: types.Model, d: types.Data):
         d._hip_coalesce_io_pending = False
         print(f"[INFO] AMD Opt A+: COALESCE_IO buffers allocated via hipMalloc "
               f"(stable non-pooled pointers for hipGraph capture)")
-      if hasattr(d, "_solver_ctx"):
-        ctx = d._solver_ctx
-        ctx.grad.zero_()
-        ctx.Mgrad.zero_()
-        if ctx.h.shape[0] > 0:
-          ctx.h.zero_()
-        if ctx.hfactor.shape[0] > 0:
-          ctx.hfactor.zero_()
-      else:
-        ctx = create_solver_context(m, d)
+      if not hasattr(d, "_solver_ctx"):
+        import warp as _wp_s; _dev_s = _wp_s.get_device()
+        _p = _wp_s.is_mempool_enabled(_dev_s)
+        if _p: _wp_s.set_mempool_enabled(_dev_s, False)
+        d._solver_ctx = create_solver_context(m, d)
+        if _p: _wp_s.set_mempool_enabled(_dev_s, True)
+      ctx = d._solver_ctx
+      ctx.grad.zero_()
+      ctx.Mgrad.zero_()
+      if ctx.h.shape[0] > 0:
+        ctx.h.zero_()
+      if ctx.hfactor.shape[0] > 0:
+        ctx.hfactor.zero_()
       _solve(m, d, ctx)
 
 
