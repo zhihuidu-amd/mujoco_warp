@@ -663,15 +663,18 @@ def fwd_position(m: Model, d: Data, factorize: bool = True):
   # hipGraph (ThreadLocal mode) only captures default stream — secondary streams missed.
   # hipGraph gain (~40-60%) >> multi-stream gain (~5-10%), so disable multi-stream
   # when hipGraph is active to allow full step capture on single stream.
-  import os as _fwd_os
-  _hip_graph_mode = _fwd_os.environ.get("WP_HIP_GRAPH_ENABLE", "0") == "1"
-  if (not _hip_graph_mode and
-      m.opt.run_collision_detection and
+  if (m.opt.run_collision_detection and
       hasattr(d, "_stream_collision") and hasattr(d, "_stream_secondary")):
-    # Stream A: collision (reads geom_xpos written by kinematics — safe now)
+    # Multi-stream path: collision and kinematics work run concurrently.
+    # Use event-based sync (recordable in hipGraph) instead of stream sync (not recordable).
+    # This works for both eager execution AND hipGraph capture (GlobalMode or ThreadLocal).
+    import warp as _wp_fwd
+
+    # Stream A: collision
     with wp.ScopedStream(d._stream_collision):
       collision_driver.collision(m, d)
-    # Stream B: mass matrix and remaining kinematics work (independent of collision)
+
+    # Stream B: mass matrix + remaining kinematics (independent of collision)
     with wp.ScopedStream(d._stream_secondary):
       smooth.camlight(m, d)
       smooth.flex(m, d)
@@ -680,11 +683,21 @@ def fwd_position(m: Model, d: Data, factorize: bool = True):
       smooth.tendon_armature(m, d)
       if factorize:
         smooth.factor_m(m, d)
-    # Sync both before make_constraint (needs collision output + M from factor_m)
-    wp.synchronize_stream(d._stream_collision)
-    wp.synchronize_stream(d._stream_secondary)
+
+    # Event-based join: primary stream waits for both secondary streams.
+    # wp.record_event + wp.wait_event become graph nodes (capturable).
+    # This replaces wp.synchronize_stream which is CPU-blocking and not capturable.
+    if not hasattr(d, "_event_collision"):
+      d._event_collision = _wp_fwd.Event(device=_wp_fwd.get_device())
+    if not hasattr(d, "_event_secondary"):
+      d._event_secondary = _wp_fwd.Event(device=_wp_fwd.get_device())
+
+    _wp_fwd.record_event(d._event_collision, stream=d._stream_collision)
+    _wp_fwd.record_event(d._event_secondary, stream=d._stream_secondary)
+    _wp_fwd.wait_event(d._event_collision)   # primary stream waits for collision
+    _wp_fwd.wait_event(d._event_secondary)   # primary stream waits for secondary
   else:
-    # Non-AMD or streams not initialized: sequential path
+    # Sequential path: no secondary streams (CPU-only, or streams not initialized)
     smooth.camlight(m, d)
     smooth.flex(m, d)
     smooth.tendon(m, d)
