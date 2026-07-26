@@ -3491,8 +3491,11 @@ def _solve(m: types.Model, d: types.Data, ctx: SolverContext):
     if not hasattr(d, "_nsolving_host"):
       d._nsolving_host = wp.empty(1, dtype=int, device="cpu", pinned=True)
     _dev = wp.get_device()
-    # AMD: skip D2H sync during hipGraph capture (synchronize_stream forbidden)
-    _in_capture = getattr(d, "_hip_graph_capturing", False)
+    # AMD: skip D2H sync during hipGraph capture (synchronize_stream forbidden).
+    # Use warp's stream capture detection instead of the _hip_graph_capturing flag
+    # so this works even when step() is called directly inside wp.capture_begin().
+    import torch as _torch_solver
+    _in_capture = _torch_solver.cuda.is_current_stream_capturing() if _dev.is_hip else False
     for i in range(m.opt.iterations):
       _solver_iteration(m, d, ctx, step_size_cost, nsolving)
       if not _in_capture and (i + 1) % N_CHECK == 0:
@@ -3568,7 +3571,8 @@ def _solve_islands(m: types.Model, d: types.Data, ctx: IslandSolverContext):
     _dev = wp.get_device()
     for i in range(m.opt.iterations):
       _solver_iteration_island(m, d, ctx, nsolving)
-      if not getattr(d, "_hip_graph_capturing", False) and (i + 1) % N_CHECK == 0:
+      _in_cap_is = __import__("torch").cuda.is_current_stream_capturing() if _dev.is_hip else False
+      if not _in_cap_is and (i + 1) % N_CHECK == 0:
         wp.copy(d._nsolving_host_island, nsolving)
         wp.synchronize_stream(_dev)  # stream-scoped sync: ~2µs
         if d._nsolving_host_island.numpy()[0] == 0:
