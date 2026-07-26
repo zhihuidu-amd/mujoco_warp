@@ -1528,10 +1528,6 @@ def put_data(
   # allocs inside ScopedCapture. Pool stays ENABLED (PR#15 validates hipMemsetAsync
   # with graph capture on ROCm 7.2). COALESCE_IO only prevents allocation, not memset.
   if _hip_graph_enabled:
-    _alloc_h = int(getattr(getattr(mjm, "opt", None), "solver", 2)) == 3
-    _alloc_hf = _alloc_h and mjm.nv > 64
-    _nv_pad = int(getattr(mjm, "nv_pad", mjm.nv))
-    d._solver_ctx = _solver_ctx_prealloc(nworld, mjm.nv, _nv_pad, d.njmax, _alloc_h, _alloc_hf)
     _ls_par = bool(getattr(getattr(mjm, "opt", None), "ls_parallel", False))
     _ls_it = int(getattr(getattr(mjm, "opt", None), "ls_iterations", 10)) if _ls_par else 0
     d._step_size_cost = wp.empty((nworld, _ls_it), dtype=float)
