@@ -687,15 +687,21 @@ def fwd_position(m: Model, d: Data, factorize: bool = True):
     # Event-based join: primary stream waits for both secondary streams.
     # wp.record_event + wp.wait_event become graph nodes (capturable).
     # This replaces wp.synchronize_stream which is CPU-blocking and not capturable.
+    # Event-based join: record completion on secondary streams,
+    # then have primary stream wait on both events.
+    # stream.record_event() and stream.wait_event() are capturable as graph nodes.
     if not hasattr(d, "_event_collision"):
       d._event_collision = _wp_fwd.Event(device=_wp_fwd.get_device())
     if not hasattr(d, "_event_secondary"):
       d._event_secondary = _wp_fwd.Event(device=_wp_fwd.get_device())
 
-    _wp_fwd.record_event(d._event_collision, stream=d._stream_collision)
-    _wp_fwd.record_event(d._event_secondary, stream=d._stream_secondary)
-    _wp_fwd.wait_event(d._event_collision)   # primary stream waits for collision
-    _wp_fwd.wait_event(d._event_secondary)   # primary stream waits for secondary
+    # Record events on secondary streams (marks their completion point)
+    d._stream_collision.record_event(d._event_collision)
+    d._stream_secondary.record_event(d._event_secondary)
+
+    # Primary stream waits for both (GPU-side dependency, no CPU block)
+    _wp_fwd.get_device().stream.wait_event(d._event_collision)
+    _wp_fwd.get_device().stream.wait_event(d._event_secondary)
   else:
     # Sequential path: no secondary streams (CPU-only, or streams not initialized)
     smooth.camlight(m, d)
