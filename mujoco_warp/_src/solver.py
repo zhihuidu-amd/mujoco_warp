@@ -3990,6 +3990,26 @@ def _solve(m: types.Model, d: types.Data, ctx: SolverContext, compact: bool = Fa
     # becomes zero and all worlds are marked as converged to avoid an infinite loop.
     # note: we only launch the iteration kernel if everything is not done
     wp.capture_while(nsolving, while_body=_solver_iteration, m=m, d=d, ctx=ctx, nsolving=nsolving, compact=compact)
+  elif m.opt.iterations != 0 and wp.get_device().is_hip:
+    # AMD ROCm: wp.capture_while (CUDA conditional graph nodes) is not available
+    # on HIP. Implement convergence-based early exit by sampling the nsolving
+    # counter every N_CHECK iterations with a stream-scoped D2H sync (~2 us).
+    # Worlds that converge early stop contributing to nsolving; when nsolving
+    # reaches 0 all worlds have converged and we exit the loop.
+    # The _in_capture guard skips the sync during hipGraph capture (synchronize
+    # inside capture raises hipErrorStreamCaptureImplicit).
+    N_CHECK = 3
+    if not hasattr(d, '_nsolving_host'):
+      d._nsolving_host = wp.empty(1, dtype=int, device='cpu', pinned=True)
+    _dev = wp.get_device()
+    _in_capture = _dev.is_capturing if _dev.is_hip else False
+    for i in range(m.opt.iterations):
+      _solver_iteration(m, d, ctx, nsolving, compact=compact)
+      if not _in_capture and (i + 1) % N_CHECK == 0:
+        wp.copy(d._nsolving_host, nsolving)
+        wp.synchronize_stream(_dev)  # stream-scoped sync, ~2 us
+        if d._nsolving_host.numpy()[0] == 0:
+          break  # all worlds converged early
   else:
     # This branch is mostly for when JAX is used as it is currently not compatible
     # with CUDA graph conditional.
