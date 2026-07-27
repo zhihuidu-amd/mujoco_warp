@@ -1857,6 +1857,17 @@ def make_data(
   d.cdof_dof.fill_(-1)
 
   _mark_batched(d)
+
+  # AMD: pre-create dedicated streams and events for multi-stream parallelism
+  # in fwd_position. Guarded with is_hip -- NVIDIA CUDA is unaffected.
+  _device = wp.get_device()
+  if _device.is_hip:
+    import warp._internal as _wp_inner
+    d._stream_collision = _wp_inner.Stream(_device)  # collision detection
+    d._stream_secondary = _wp_inner.Stream(_device)  # CRB + factor_M
+    d._event_collision  = _wp_inner.Event(_device)   # join point
+    d._event_secondary  = _wp_inner.Event(_device)   # join point
+
   return d
 
 

@@ -118,3 +118,4 @@ from mujoco_warp._src.types import SolverType as SolverType
 from mujoco_warp._src.types import State as State
 from mujoco_warp._src.types import Statistic as Statistic
 from mujoco_warp._src.types import TrnType as TrnType
+from mujoco_warp._src.hip_graph import hip_graph_capture as hip_graph_capture

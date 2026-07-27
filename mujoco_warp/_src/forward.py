@@ -649,7 +649,25 @@ def fwd_position(m: Model, d: Data, factorize: bool = True):
   smooth.tendon_armature(m, d)
   if factorize:
     smooth.factor_m(m, d)
-  if m.opt.run_collision_detection:
+  # AMD multi-stream: when dedicated streams are available (is_hip + put_data),
+  # collision and CRB/factor_M run concurrently, joined via GPU events.
+  # Sleep paths and non-HIP devices always use the sequential fallback.
+  if (m.opt.run_collision_detection
+      and not sleep_enabled
+      and hasattr(d, '_stream_collision')
+      and hasattr(d, '_stream_secondary')):
+    with wp.ScopedStream(d._stream_collision):
+      collision_driver.collision(m, d)
+    with wp.ScopedStream(d._stream_secondary):
+      smooth.crb(m, d)
+      if factorize:
+        smooth.factor_m(m, d)
+    # GPU event join (capturable as graph nodes in CUDA and HIP)
+    d._stream_collision.record_event(d._event_collision)
+    d._stream_secondary.record_event(d._event_secondary)
+    wp.get_device().stream.wait_event(d._event_collision)
+    wp.get_device().stream.wait_event(d._event_secondary)
+  elif m.opt.run_collision_detection:
     if sleep_enabled:
       # pass 1
       collision_driver.collision(m, d)

@@ -3948,7 +3948,18 @@ def solve(m: types.Model, d: types.Data):
     wp.copy(d.qacc, d.qacc_smooth)
     d.solver_niter.fill_(0)
   else:
-    ctx = _create_solver_context(m, d)
+    # AMD COALESCE-ALLOC: cache solver context using hipMalloc (non-pooled)
+  # so no hipMallocAsync calls occur inside hipGraph capture windows.
+  # On NVIDIA CUDA the hasattr check still fires but the is_hip block is skipped.
+  if not hasattr(d, '_solver_ctx'):
+    _dev = wp.get_device()
+    if _dev.is_hip and wp.is_mempool_enabled(_dev):
+      wp.set_mempool_enabled(_dev, False)
+      d._solver_ctx = _create_solver_context(m, d)
+      wp.set_mempool_enabled(_dev, True)
+    else:
+      d._solver_ctx = _create_solver_context(m, d)
+  ctx = d._solver_ctx
     _solve(m, d, ctx)
 
 
@@ -3990,6 +4001,22 @@ def _solve(m: types.Model, d: types.Data, ctx: SolverContext, compact: bool = Fa
     # becomes zero and all worlds are marked as converged to avoid an infinite loop.
     # note: we only launch the iteration kernel if everything is not done
     wp.capture_while(nsolving, while_body=_solver_iteration, m=m, d=d, ctx=ctx, nsolving=nsolving, compact=compact)
+  elif m.opt.iterations != 0 and wp.get_device().is_hip:
+    # AMD: hipGraph lacks conditional graph nodes (CUDA capture_while).
+    # Sample nsolving every N_CHECK iters with a stream-scoped D2H sync (~2 us).
+    # Skip sync during hipGraph capture (synchronize inside capture raises error).
+    N_CHECK = 3
+    if not hasattr(d, '_nsolving_host'):
+      d._nsolving_host = wp.empty(1, dtype=int, device='cpu', pinned=True)
+    _dev = wp.get_device()
+    _in_capture = _dev.is_capturing if _dev.is_hip else False
+    for i in range(m.opt.iterations):
+      _solver_iteration(m, d, ctx, nsolving, compact=compact)
+      if not _in_capture and (i + 1) % N_CHECK == 0:
+        wp.copy(d._nsolving_host, nsolving)
+        wp.synchronize_stream(_dev)  # ~2 us stream-scoped sync
+        if d._nsolving_host.numpy()[0] == 0:
+          break  # all worlds converged
   else:
     # This branch is mostly for when JAX is used as it is currently not compatible
     # with CUDA graph conditional.
